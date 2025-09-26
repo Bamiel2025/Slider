@@ -1,0 +1,5 @@
+{
+  "name": "Interactive Image Comparator",
+  "description": "Upload two images to generate a shareable, interactive HTML page. This page features a slider for side-by-side comparison, along with tools to measure distances and areas directly on the images.",
+  "requestFramePermissions": []
+}
