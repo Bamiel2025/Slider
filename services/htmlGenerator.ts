@@ -78,7 +78,7 @@ export const generateComparisonHtml = (
         position: absolute;
         /* width, height, top, left are set by JS */
         will-change: transform;
-        z-index: 1;
+        transition: opacity 0.2s;
     }
     .comparison-image {
       position: absolute;
@@ -88,6 +88,16 @@ export const generateComparisonHtml = (
       height: 100%;
       pointer-events: none;
       user-select: none;
+    }
+    #image-one-wrapper {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      clip-path: inset(0 50% 0 0);
+      z-index: 1;
     }
     #image-two-wrapper {
       position: absolute;
@@ -110,6 +120,7 @@ export const generateComparisonHtml = (
       cursor: ew-resize;
       z-index: 10;
       pointer-events: none;
+      transition: opacity 0.3s;
     }
      #slider-handle {
       position: absolute;
@@ -126,6 +137,7 @@ export const generateComparisonHtml = (
       box-shadow: 0 2px 8px rgba(0,0,0,0.3);
       cursor: ew-resize;
       z-index: 11;
+      transition: opacity 0.3s;
     }
     #slider-handle::before,
     #slider-handle::after {
@@ -183,6 +195,24 @@ export const generateComparisonHtml = (
       background-color: #e9e9e9;
       border-color: #bbb;
     }
+    /* Edit mode styles */
+    .edit-mode #transformer-2 {
+      border: 2px dashed var(--active-tool-color);
+      cursor: move;
+      opacity: 0.7;
+    }
+    .edit-mode #slider-handle, .edit-mode #slider-bar {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .edit-mode .controls button:not(#edit-tool) {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+    .edit-mode #image-one-wrapper,
+    .edit-mode #image-two-wrapper {
+      clip-path: none; /* Show full images for alignment */
+    }
   </style>
 </head>
 <body>
@@ -191,8 +221,10 @@ export const generateComparisonHtml = (
     <div class="comparison-container" id="container">
       
       <!-- Base Layer (Image 1) -->
-      <div class="image-transformer" id="transformer-1" style="${transformStyle1}">
-        <img src="${image1}" class="comparison-image" id="image-one" alt="Image 1">
+      <div id="image-one-wrapper">
+        <div class="image-transformer" id="transformer-1" style="${transformStyle1}">
+          <img src="${image1}" class="comparison-image" id="image-one" alt="Image 1">
+        </div>
       </div>
       
       <!-- Clipped Top Layer (Image 2) -->
@@ -208,6 +240,7 @@ export const generateComparisonHtml = (
     </div>
     <div class="controls">
       <span>Outils :</span>
+      <button id="edit-tool">Éditer l'alignement</button>
       <button id="distance-tool">Mesurer la distance</button>
       <button id="area-tool">Mesurer la surface</button>
       <button id="clear-tool">Effacer les mesures</button>
@@ -215,18 +248,28 @@ export const generateComparisonHtml = (
   </div>
 
   <script>
+    // --- Element Selectors ---
     const container = document.getElementById('container');
     const sliderHandle = document.getElementById('slider-handle');
     const sliderBar = document.getElementById('slider-bar');
+    const imageOneWrapper = document.getElementById('image-one-wrapper');
     const imageTwoWrapper = document.getElementById('image-two-wrapper');
     const canvas = document.getElementById('measurement-canvas');
     const ctx = canvas.getContext('2d');
+    const editTarget = document.getElementById('transformer-2');
     
+    // --- Buttons ---
     const distanceBtn = document.getElementById('distance-tool');
     const areaBtn = document.getElementById('area-tool');
     const clearBtn = document.getElementById('clear-tool');
+    const editBtn = document.getElementById('edit-tool');
 
-    let isDragging = false;
+    // --- State Variables ---
+    let isSliderDragging = false;
+    let isEditing = false;
+    let isEditDragging = false;
+    let startDragPos = { x: 0, y: 0 };
+    let currentTransform = { scale: 1, translateX: 0, translateY: 0, rotation: 0 };
     let currentTool = null;
     let currentPoints = [];
     let allMeasurements = [];
@@ -268,7 +311,7 @@ export const generateComparisonHtml = (
       
       processTransformer('transformer-1', 'image-one');
       processTransformer('transformer-2', 'image-two');
-      resizeCanvas(); // Ensure canvas is also resized
+      resizeCanvas();
     }
 
     // --- Slider Logic ---
@@ -280,14 +323,126 @@ export const generateComparisonHtml = (
         sliderHandle.style.left = \`\${percent}%\`;
         sliderBar.style.left = \`\${percent}%\`;
         imageTwoWrapper.style.clipPath = \`inset(0 0 0 \${percent}%)\`;
+        imageOneWrapper.style.clipPath = \`inset(0 \${100 - percent}% 0 0)\`;
     }
 
-    sliderHandle.addEventListener('mousedown', () => { isDragging = true; });
-    document.addEventListener('mouseup', () => { isDragging = false; });
-    document.addEventListener('mousemove', (e) => { if (isDragging) moveSlider(e.clientX); });
-    sliderHandle.addEventListener('touchstart', (e) => { isDragging = true; e.preventDefault(); }, { passive: false });
-    document.addEventListener('touchend', () => { isDragging = false; });
-    document.addEventListener('touchmove', (e) => { if (isDragging) moveSlider(e.touches[0].clientX); });
+    // --- Edit Logic ---
+    function applyTransform(element, t) {
+        element.style.transform = \`translateX(\${t.translateX}px) translateY(\${t.translateY}px) scale(\${t.scale}) rotate(\${t.rotation}deg)\`;
+    }
+
+    function getEventCoords(e) {
+        return e.touches && e.touches.length > 0 ? e.touches[0] : e;
+    }
+
+    function handleEditStart(e) {
+        if (!isEditing || isSliderDragging) return;
+        isEditDragging = true;
+        const event = getEventCoords(e);
+        startDragPos.x = event.clientX;
+        startDragPos.y = event.clientY;
+        e.preventDefault();
+    }
+
+    function handleEditMove(e) {
+        if (!isEditDragging) return;
+        const event = getEventCoords(e);
+        const dx = event.clientX - startDragPos.x;
+        const dy = event.clientY - startDragPos.y;
+        currentTransform.translateX += dx;
+        currentTransform.translateY += dy;
+        applyTransform(editTarget, currentTransform);
+        startDragPos.x = event.clientX;
+        startDragPos.y = event.clientY;
+        e.preventDefault();
+    }
+    
+    function handleEditWheel(e) {
+        if (!isEditing) return;
+        e.preventDefault();
+        const scaleAmount = -e.deltaY * 0.0005; // Reduced sensitivity for finer control
+        currentTransform.scale = Math.max(0.1, currentTransform.scale + scaleAmount * currentTransform.scale);
+        applyTransform(editTarget, currentTransform);
+    }
+    
+    function toggleEditMode() {
+        isEditing = !isEditing;
+        container.classList.toggle('edit-mode', isEditing);
+        editBtn.classList.toggle('active', isEditing);
+        canvas.style.pointerEvents = isEditing ? 'none' : 'auto'; // BUG FIX: Allow events to pass through canvas to image
+
+        if (isEditing) {
+            setActiveTool(null);
+            editBtn.textContent = 'Appliquer les changements';
+            const initialStyle = window.getComputedStyle(editTarget);
+            const matrix = new DOMMatrixReadOnly(initialStyle.transform);
+            currentTransform = {
+                translateX: matrix.e,
+                translateY: matrix.f,
+                scale: matrix.a,
+                rotation: 0 
+            };
+            
+            // Overwrite transform with pixel values for direct manipulation
+            applyTransform(editTarget, currentTransform);
+            
+            editTarget.addEventListener('mousedown', handleEditStart);
+            editTarget.addEventListener('touchstart', handleEditStart, { passive: false });
+            editTarget.addEventListener('wheel', handleEditWheel, { passive: false });
+        } else {
+            editBtn.textContent = "Éditer l'alignement";
+            editTarget.removeEventListener('mousedown', handleEditStart);
+            editTarget.removeEventListener('touchstart', handleEditStart);
+            editTarget.removeEventListener('wheel', handleEditWheel);
+            
+            // Convert final pixel translation back to percentage and notify parent
+            const targetRect = editTarget.getBoundingClientRect();
+            if (targetRect.width > 0 && targetRect.height > 0) {
+                const percentTranslateX = (currentTransform.translateX / targetRect.width) * 100;
+                const percentTranslateY = (currentTransform.translateY / targetRect.height) * 100;
+                
+                const finalTransform = {
+                    scale: currentTransform.scale,
+                    translateX: percentTranslateX,
+                    translateY: percentTranslateY,
+                    rotation: currentTransform.rotation,
+                };
+                window.parent.postMessage({ type: 'transform-update', transform: finalTransform }, '*');
+            }
+
+            const sliderPosition = parseFloat(sliderHandle.style.left || '50');
+            moveSlider(container.getBoundingClientRect().left + container.getBoundingClientRect().width * (sliderPosition / 100));
+        }
+    }
+    editBtn.addEventListener('click', toggleEditMode);
+    
+    // --- Global Event Handlers ---
+    function handleGlobalMove(e) {
+        if (isSliderDragging) {
+            const event = getEventCoords(e);
+            moveSlider(event.clientX);
+        }
+        if (isEditDragging) {
+            handleEditMove(e);
+        }
+    }
+
+    function handleGlobalEnd() {
+        isSliderDragging = false;
+        isEditDragging = false;
+    }
+
+    document.addEventListener('mousemove', handleGlobalMove);
+    document.addEventListener('mouseup', handleGlobalEnd);
+    document.addEventListener('touchmove', handleGlobalMove, { passive: false });
+    document.addEventListener('touchend', handleGlobalEnd);
+
+    sliderHandle.addEventListener('mousedown', (e) => { 
+        if(!isEditing) { isSliderDragging = true; e.preventDefault(); }
+    });
+    sliderHandle.addEventListener('touchstart', (e) => { 
+        if(!isEditing) { isSliderDragging = true; e.preventDefault(); }
+    }, { passive: false });
     
     // --- Canvas and Measurement Logic ---
     function resizeCanvas() {
@@ -299,20 +454,19 @@ export const generateComparisonHtml = (
     
     function getCanvasCoords(e) {
         const rect = canvas.getBoundingClientRect();
-        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        const x = clientX - rect.left;
-        const y = clientY - rect.top;
-        return { x, y };
+        const event = getEventCoords(e);
+        return { x: event.clientX - rect.left, y: event.clientY - rect.top };
     }
 
     function setActiveTool(tool) {
+        if(isEditing) return;
         currentTool = tool;
         currentPoints = [];
         distanceBtn.classList.toggle('active', tool === 'distance');
         areaBtn.classList.toggle('active', tool === 'area');
-        canvas.style.cursor = tool ? 'crosshair' : 'default';
-        container.style.cursor = tool ? 'crosshair' : 'default';
+        const cursor = tool ? 'crosshair' : 'default';
+        canvas.style.cursor = cursor;
+        container.style.cursor = cursor;
         drawAll();
     }
 

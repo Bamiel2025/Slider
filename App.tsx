@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import ImageUploader from './components/ImageUploader';
 import { generateComparisonHtml, Transform } from './services/htmlGenerator';
 import { ExportIcon, GenerateIcon, AnalyzeIcon } from './components/Icons';
@@ -11,6 +11,20 @@ const App: React.FC = () => {
   const [generatedHtml, setGeneratedHtml] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [loadingText, setLoadingText] = useState<string>('');
+  const [transform1, setTransform1] = useState<Transform | null>(null);
+  const [transform2, setTransform2] = useState<Transform | null>(null);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'transform-update') {
+        setTransform2(event.data.transform);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, []);
 
   const getBase64 = (dataUrl: string) => dataUrl.substring(dataUrl.indexOf(',') + 1);
   const getMimeType = (dataUrl: string) => dataUrl.substring(dataUrl.indexOf(':') + 1, dataUrl.indexOf(';'));
@@ -20,8 +34,9 @@ const App: React.FC = () => {
 
     setIsLoading(true);
     setGeneratedHtml(null);
-    let transform1: Transform = { scale: 1, translateX: 0, translateY: 0, rotation: 0 };
-    let transform2: Transform | null = null;
+    
+    const baseTransform1: Transform = { scale: 1, translateX: 0, translateY: 0, rotation: 0 };
+    let finalTransform2: Transform;
 
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
@@ -69,24 +84,27 @@ Respond ONLY with the JSON object.`;
           responseSchema: transformSchema,
         },
       });
-      transform2 = JSON.parse(alignResponse.text);
+      finalTransform2 = JSON.parse(alignResponse.text);
 
     } catch (error) {
       console.error("AI analysis failed:", error);
-      // Fallback to non-aligned generation if any AI step fails
-      transform2 = null; 
-    } finally {
-      setLoadingText("Génération de l'aperçu...");
-      const html = generateComparisonHtml(image1, image2, transform1, transform2);
-      setGeneratedHtml(html);
-      setIsLoading(false);
-      setLoadingText('');
+      finalTransform2 = { scale: 1, translateX: 0, translateY: 0, rotation: 0 };
     }
+      
+    setTransform1(baseTransform1);
+    setTransform2(finalTransform2);
+
+    setLoadingText("Génération de l'aperçu...");
+    const html = generateComparisonHtml(image1, image2, baseTransform1, finalTransform2);
+    setGeneratedHtml(html);
+    setIsLoading(false);
+    setLoadingText('');
   }, [image1, image2]);
 
   const handleExport = useCallback(() => {
-    if (generatedHtml) {
-      const blob = new Blob([generatedHtml], { type: 'text/html' });
+    if (image1 && image2) {
+      const finalHtml = generateComparisonHtml(image1, image2, transform1, transform2);
+      const blob = new Blob([finalHtml], { type: 'text/html' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -96,7 +114,7 @@ Respond ONLY with the JSON object.`;
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     }
-  }, [generatedHtml]);
+  }, [generatedHtml, image1, image2, transform1, transform2]);
 
   const isGenerating = loadingText.includes('Génération');
 
