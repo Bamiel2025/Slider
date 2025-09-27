@@ -213,6 +213,9 @@ export const generateComparisonHtml = (
     .edit-mode #image-two-wrapper {
       clip-path: none; /* Show full images for alignment */
     }
+    .edit-mode #image-two-wrapper {
+      z-index: 3; /* Ensure second image is on top for editing */
+    }
   </style>
 </head>
 <body>
