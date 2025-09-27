@@ -213,9 +213,6 @@ export const generateComparisonHtml = (
     .edit-mode #image-two-wrapper {
       clip-path: none; /* Show full images for alignment */
     }
-    .edit-mode #image-one-wrapper {
-      z-index: 3; /* Bring first image to front for better alignment visibility */
-    }
   </style>
 </head>
 <body>
