@@ -199,7 +199,7 @@ export const generateComparisonHtml = (
     .edit-mode #transformer-2 {
       border: 2px dashed var(--active-tool-color);
       cursor: move;
-      opacity: 0.7;
+      opacity: 0.4;
     }
     .edit-mode #slider-handle, .edit-mode #slider-bar {
       opacity: 0;
@@ -212,6 +212,9 @@ export const generateComparisonHtml = (
     .edit-mode #image-one-wrapper,
     .edit-mode #image-two-wrapper {
       clip-path: none; /* Show full images for alignment */
+    }
+    .edit-mode #image-one-wrapper {
+      z-index: 3; /* Bring first image to front for better alignment visibility */
     }
   </style>
 </head>
