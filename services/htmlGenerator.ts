@@ -199,7 +199,7 @@ export const generateComparisonHtml = (
     .edit-mode #transformer-2 {
       border: 2px dashed var(--active-tool-color);
       cursor: move;
-      opacity: 0.4;
+      opacity: 0.6;
     }
     .edit-mode #slider-handle, .edit-mode #slider-bar {
       opacity: 0;
